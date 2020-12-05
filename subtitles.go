@@ -16,6 +16,7 @@ var (
 	BytesBOM           = []byte{239, 187, 191}
 	bytesLineSeparator = []byte("\n")
 	bytesSpace         = []byte(" ")
+	bytesClosectag     = []byte("</c>")
 )
 
 // Colors
@@ -109,10 +110,10 @@ func NewSubtitles() *Subtitles {
 // Item represents a text to show between 2 time boundaries with formatting
 type Item struct {
 	Comments    []string
-	Index       int
 	EndAt       time.Duration
 	InlineStyle *StyleAttributes
 	Lines       []Line
+	Metadata    *ItemMetadata
 	Region      *Region
 	StartAt     time.Duration
 	Style       *Style
@@ -158,6 +159,57 @@ func (c *Color) TTMLString() string {
 	return fmt.Sprintf("%.6x", uint32(c.Red)<<16|uint32(c.Green)<<8|uint32(c.Blue))
 }
 
+// WebVTTString expresses the color as a webvtt string
+func (c *Color) WebVTTString() string {
+	switch c {
+	case ColorBlack:
+		return "<c.black>" //rgba(0,0,0,1)
+	case ColorRed:
+		return "<c.red>" //rgba(255,0,0,1)
+	case ColorGreen:
+		return "<c.lime>" //rgba(0,255,0,1)
+	case ColorYellow:
+		return "<c.yellow>" //rgba(255,255,0,1)
+	case ColorBlue:
+		return "<c.blue>" //rgba(0,0,255,1)
+	case ColorMagenta:
+		return "<c.magenta>" //rgba(255,0,255,1)
+	case ColorCyan:
+		return "<c.cyan>" //rgba(0,255,255,1)
+	case ColorWhite:
+		return "<c.white>" //rgba(255,255,255,1)
+	default:
+		return ""
+	}
+
+}
+
+// WebVTTLine  WebVTT Vertical Position From STL
+func (sv *stlVerticalPosition) WebVTTLine() string {
+	if *sv < 3 { //top
+		return "20%"
+	} else if *sv <= 12 { //(23/2)+1	//middle
+		return "50%"
+	} else {
+		return ""
+	}
+}
+
+// WebVTTPosition WebVTT Jusitification from STL
+func (sj *stlJustificationCode) WebVTTPosition() string {
+	switch *sj {
+	case stlJustificationCodeLeftJustifiedText:
+		return "20%" //left
+	case stlJustificationCodeRightJustifiedText:
+		return "80%" //right
+	default:
+		return ""
+	}
+}
+
+type stlVerticalPosition int
+type stlJustificationCode byte
+
 // StyleAttributes represents style attributes
 type StyleAttributes struct {
 	SSAAlignment         *int
@@ -189,6 +241,8 @@ type StyleAttributes struct {
 	STLBoxing            *bool
 	STLItalics           *bool
 	STLUnderline         *bool
+	STLVerticalPostion   *stlVerticalPosition
+	STLJustificationCode *stlJustificationCode
 	TeletextColor        *Color
 	TeletextDoubleHeight *bool
 	TeletextDoubleSize   *bool
@@ -230,15 +284,24 @@ type StyleAttributes struct {
 	WebVTTVertical       string
 	WebVTTViewportAnchor string
 	WebVTTWidth          string
+	WebVTTColor          string
 }
 
 func (sa *StyleAttributes) propagateSSAAttributes() {}
 
-func (sa *StyleAttributes) propagateSTLAttributes() {}
+func (sa *StyleAttributes) propagateSTLAttributes() {
+	if sa.STLVerticalPostion != nil {
+		sa.WebVTTLine = sa.STLVerticalPostion.WebVTTLine()
+	}
+	if sa.STLJustificationCode != nil {
+		sa.WebVTTPosition = sa.STLJustificationCode.WebVTTPosition()
+	}
+}
 
 func (sa *StyleAttributes) propagateTeletextAttributes() {
 	if sa.TeletextColor != nil {
 		sa.TTMLColor = "#" + sa.TeletextColor.TTMLString()
+		sa.WebVTTColor = sa.TeletextColor.WebVTTString()
 	}
 }
 
@@ -270,6 +333,16 @@ type Metadata struct {
 	STLPublisher                                        string
 	Title                                               string
 	TTMLCopyright                                       string
+}
+
+//ItemMetadata represents specific item metadata
+type ItemMetadata struct {
+	Index                   int
+	STLCommentFlag          *byte
+	STLCumulativeStatus     *byte
+	STLExtensionBlockNumber *int
+	STLSubtitleGroupNumber  *int
+	STLText                 *[]byte
 }
 
 // Region represents a subtitle's region

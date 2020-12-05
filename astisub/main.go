@@ -15,6 +15,7 @@ var (
 	teletextPage     = flag.Int("p", 0, "the teletext page")
 	outputPath       = flag.String("o", "", "the output path")
 	syncDuration     = flag.Duration("s", 0, "the sync duration")
+	syncTime         = flag.Duration("t", -1, "the sync time")
 )
 
 func main() {
@@ -89,12 +90,16 @@ func main() {
 		}
 	case "sync":
 		// Validate sync duration
-		if *syncDuration == 0 {
-			log.Fatal("Use -s to provide a sync duration")
+		if *syncDuration == 0 && *syncTime < 0 {
+			log.Fatal("Use -s or -t to provide a sync duration or sync time")
 		}
 
-		// Fragment
-		sub.Add(*syncDuration)
+		// Add
+		if *syncDuration > 0 {
+			sub.Add(*syncDuration)
+		} else if *syncTime > -1 && len(sub.Items) > 0 {
+			sub.Add(*syncTime - sub.Items[0].StartAt)
+		}
 
 		// Write
 		if err = sub.Write(*outputPath); err != nil {

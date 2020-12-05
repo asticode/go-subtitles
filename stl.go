@@ -161,6 +161,16 @@ const (
 // TTI Special Extension Block Number
 const extensionBlockNumberReservedUserData = 0xfe
 
+func newSTLJustificationCode(b byte) *stlJustificationCode {
+	j := stlJustificationCode(b)
+	return &j
+}
+
+func newSTLVerticalPosition(i int) *stlVerticalPosition {
+	v := stlVerticalPosition(i)
+	return &v
+}
+
 // ReadFromSTL parses an .stl content
 func ReadFromSTL(i io.Reader) (o *Subtitles, err error) {
 	// Init
@@ -218,10 +228,15 @@ func ReadFromSTL(i io.Reader) (o *Subtitles, err error) {
 			continue
 		}
 
+		var starttime = g.timecodeStartOfProgramme
+		if starttime > t.timecodeIn {
+			starttime = 0
+		}
 		// Create item
 		var i = &Item{
-			EndAt:   t.timecodeOut - g.timecodeStartOfProgramme,
-			StartAt: t.timecodeIn - g.timecodeStartOfProgramme,
+			EndAt:    t.timecodeOut - starttime,
+			Metadata: &ItemMetadata{},
+			StartAt:  t.timecodeIn - starttime,
 		}
 
 		// Loop through rows
@@ -229,9 +244,30 @@ func ReadFromSTL(i io.Reader) (o *Subtitles, err error) {
 			parseTeletextRow(i, ch, func() styler { return newSTLStyler() }, text)
 		}
 
-		// Append item
-		o.Items = append(o.Items, i)
+		if i.InlineStyle == nil {
+			i.InlineStyle = &StyleAttributes{}
+		}
 
+		i.InlineStyle.STLVerticalPostion = newSTLVerticalPosition(t.verticalPosition)
+		i.InlineStyle.STLJustificationCode = newSTLJustificationCode(t.justificationCode)
+
+		i.InlineStyle.propagateSTLAttributes()
+
+		//Get ItemMetadata
+		i.Metadata = &ItemMetadata{
+			Index: t.subtitleNumber,
+		}
+
+		i.Metadata.STLCommentFlag = &t.commentFlag
+		i.Metadata.STLCumulativeStatus = &t.cumulativeStatus
+		i.Metadata.STLExtensionBlockNumber = &t.extensionBlockNumber
+		i.Metadata.STLSubtitleGroupNumber = &t.subtitleGroupNumber
+		i.Metadata.STLText = &t.text
+
+		if len(i.Lines) > 0 {
+			// Append item
+			o.Items = append(o.Items, i)
+		}
 	}
 	return
 }
@@ -590,23 +626,57 @@ type ttiBlock struct {
 func newTTIBlock(i *Item, idx int) (t *ttiBlock) {
 	// Init
 	t = &ttiBlock{
-		commentFlag:          stlCommentFlagTextContainsSubtitleData,
-		cumulativeStatus:     stlCumulativeStatusSubtitleNotPartOfACumulativeSet,
-		extensionBlockNumber: 255,
-		justificationCode:    stlJustificationCodeLeftJustifiedText,
-		subtitleGroupNumber:  0,
-		subtitleNumber:       idx,
-		timecodeIn:           i.StartAt,
-		timecodeOut:          i.EndAt,
-		verticalPosition:     20,
+		subtitleNumber: idx,
+		timecodeIn:     i.StartAt,
+		timecodeOut:    i.EndAt,
+	}
+
+	if i.Metadata.STLCommentFlag != nil {
+		t.commentFlag = *i.Metadata.STLCommentFlag
+	} else {
+		t.commentFlag = stlCommentFlagTextContainsSubtitleData
+	}
+
+	if i.Metadata.STLCumulativeStatus != nil {
+		t.commentFlag = *i.Metadata.STLCumulativeStatus
+	} else {
+		t.commentFlag = stlCumulativeStatusSubtitleNotPartOfACumulativeSet
+	}
+
+	if i.Metadata.STLExtensionBlockNumber != nil {
+		t.extensionBlockNumber = *i.Metadata.STLExtensionBlockNumber
+	} else {
+		t.extensionBlockNumber = 255
+	}
+
+	if i.InlineStyle.STLJustificationCode != nil {
+		t.justificationCode = byte(*i.InlineStyle.STLJustificationCode)
+	} else {
+		t.justificationCode = stlJustificationCodeLeftJustifiedText
+	}
+
+	if i.Metadata.STLSubtitleGroupNumber != nil {
+		t.subtitleGroupNumber = *i.Metadata.STLSubtitleGroupNumber
+	} else {
+		t.subtitleGroupNumber = 0
+	}
+
+	if i.InlineStyle.STLVerticalPostion != nil && *i.InlineStyle.STLVerticalPostion > 0 {
+		t.verticalPosition = int(*i.InlineStyle.STLVerticalPostion)
+	} else {
+		t.verticalPosition = 20
 	}
 
 	// Add text
-	var lines []string
-	for _, l := range i.Lines {
-		lines = append(lines, l.String())
+	if i.Metadata.STLText != nil && len(*i.Metadata.STLText) > 0 {
+		t.text = *i.Metadata.STLText
+	} else {
+		var lines []string
+		for _, l := range i.Lines {
+			lines = append(lines, l.String())
+		}
+		t.text = []byte(encodeTextSTL(strings.Join(lines, "\n")))
 	}
-	t.text = []byte(strings.Join(lines, "\n"))
 	return
 }
 
@@ -631,15 +701,15 @@ func (t *ttiBlock) bytes(g *gsiBlock) (o []byte) {
 	o = append(o, byte(uint8(t.subtitleGroupNumber))) // Subtitle group number
 	var b = make([]byte, 2)
 	binary.LittleEndian.PutUint16(b, uint16(t.subtitleNumber))
-	o = append(o, b...)                                                                                              // Subtitle number
-	o = append(o, byte(uint8(t.extensionBlockNumber)))                                                               // Extension block number
-	o = append(o, t.cumulativeStatus)                                                                                // Cumulative status
-	o = append(o, formatDurationSTLBytes(t.timecodeIn, g.framerate)...)                                              // Timecode in
-	o = append(o, formatDurationSTLBytes(t.timecodeOut, g.framerate)...)                                             // Timecode out
-	o = append(o, byte(uint8(t.verticalPosition)))                                                                   // Vertical position
-	o = append(o, t.justificationCode)                                                                               // Justification code
-	o = append(o, t.commentFlag)                                                                                     // Comment flag
-	o = append(o, astikit.BytesPad(encodeTextSTL(string(t.text)), '\x8f', 112, astikit.PadRight, astikit.PadCut)...) // Text field
+	o = append(o, b...)                                                                       // Subtitle number
+	o = append(o, byte(uint8(t.extensionBlockNumber)))                                        // Extension block number
+	o = append(o, t.cumulativeStatus)                                                         // Cumulative status
+	o = append(o, formatDurationSTLBytes(t.timecodeIn, g.framerate)...)                       // Timecode in
+	o = append(o, formatDurationSTLBytes(t.timecodeOut, g.framerate)...)                      // Timecode out
+	o = append(o, byte(uint8(t.verticalPosition)))                                            // Vertical position
+	o = append(o, t.justificationCode)                                                        // Justification code
+	o = append(o, t.commentFlag)                                                              // Comment flag
+	o = append(o, astikit.BytesPad(t.text, '\x8f', 112, astikit.PadRight, astikit.PadCut)...) // Text field
 	return
 }
 

@@ -353,6 +353,7 @@ func ReadFromTTML(i io.Reader) (o *Subtitles, err error) {
 		var s = &Item{
 			EndAt:       ts.End.duration(),
 			InlineStyle: ts.TTMLInStyleAttributes.styleAttributes(),
+			Metadata:    &ItemMetadata{},
 			StartAt:     ts.Begin.duration(),
 		}
 

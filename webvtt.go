@@ -56,7 +56,7 @@ func ReadFromWebVTT(i io.Reader) (o *Subtitles, err error) {
 	}
 
 	// Scan
-	var item = &Item{}
+	var item = &Item{Metadata: &ItemMetadata{}}
 	var blockName string
 	var comments []string
 	var index int
@@ -120,10 +120,11 @@ func ReadFromWebVTT(i io.Reader) (o *Subtitles, err error) {
 			// Init new item
 			item = &Item{
 				Comments:    comments,
-				Index:       index,
 				InlineStyle: &StyleAttributes{},
+				Metadata:    &ItemMetadata{},
 			}
 
+			item.Metadata.Index = index
 			// Reset index
 			index = 0
 
@@ -181,7 +182,6 @@ func ReadFromWebVTT(i io.Reader) (o *Subtitles, err error) {
 				}
 			}
 			item.InlineStyle.propagateWebVTTAttributes()
-
 			// Reset comments
 			comments = []string{}
 
@@ -344,7 +344,16 @@ func (s Subtitles) WriteToWebVTT(o io.Writer) (err error) {
 
 		// Loop through lines
 		for _, l := range item.Lines {
+			var closectag bool
+			if l.Items != nil && len(l.Items) > 0 && l.Items[0].InlineStyle != nil &&
+				l.Items[0].InlineStyle.WebVTTColor != "" {
+				c = append(c, []byte(l.Items[0].InlineStyle.WebVTTColor)...)
+				closectag = true
+			}
 			c = append(c, []byte(l.String())...)
+			if closectag {
+				c = append(c, bytesClosectag...)
+			}
 			c = append(c, bytesLineSeparator...)
 		}
 
